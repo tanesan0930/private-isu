@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -263,6 +264,11 @@ func getTemplPath(filename string) string {
 
 func getInitialize(w http.ResponseWriter, r *http.Request) {
 	dbInitialize()
+	go func() {
+		if _, err := http.Get("http://13.230.186.83:9000/api/group/collect"); err != nil {
+			log.Printf("failed to communicate with pprotein: %v", err)
+		}
+	}()
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -387,7 +393,7 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 
 	results := []Post{}
 
-	err := db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` ORDER BY `created_at` DESC")
+	err := db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` ORDER BY `created_at` DESC LIMIT 20")
 	if err != nil {
 		log.Print(err)
 		return
@@ -654,7 +660,7 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		query,
 		me.ID,
 		mime,
-		filedata,
+		[]byte(""),
 		r.FormValue("body"),
 	)
 	if err != nil {
@@ -668,9 +674,21 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// fileをpublicに保存
+	// ディレクトリがない場合は作成する
+	os.MkdirAll(filepath.Join("../public", "img", "posts"), 0755)
+	filePath := filepath.Join("../public", "img/posts", fmt.Sprintf("%d", pid)+"."+strings.Split(mime, "/")[1])
+	err = os.WriteFile(filePath, filedata, 0644)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
 	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)
 }
 
+// 基本的にはnginxから返すようにする。ファイルがない場合はgetImageを呼ぶ。
+// getImage時にファイルをpublic/img/posts/に保存する。
 func getImage(w http.ResponseWriter, r *http.Request) {
 	pidStr := r.PathValue("id")
 	pid, err := strconv.Atoi(pidStr)
