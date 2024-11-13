@@ -265,7 +265,7 @@ func getTemplPath(filename string) string {
 func getInitialize(w http.ResponseWriter, r *http.Request) {
 	dbInitialize()
 	go func() {
-		if _, err := http.Get("http://13.230.186.83:9000/api/group/collect"); err != nil {
+		if _, err := http.Get("http://18.179.196.77:9000/api/group/collect"); err != nil {
 			log.Printf("failed to communicate with pprotein: %v", err)
 		}
 	}()
@@ -660,7 +660,8 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		query,
 		me.ID,
 		mime,
-		[]byte(""),
+		filedata,
+		// []byte(""),
 		r.FormValue("body"),
 	)
 	if err != nil {
@@ -706,6 +707,16 @@ func getImage(w http.ResponseWriter, r *http.Request) {
 
 	ext := r.PathValue("ext")
 
+	// fileをpublicに保存
+	// ディレクトリがない場合は作成する
+	os.MkdirAll(filepath.Join("../public", "img", "posts"), 0755)
+	filePath := filepath.Join("../public", "img/posts", fmt.Sprintf("%d", pid)+"."+ext)
+	err = os.WriteFile(filePath, post.Imgdata, 0644)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
 	if ext == "jpg" && post.Mime == "image/jpeg" ||
 		ext == "png" && post.Mime == "image/png" ||
 		ext == "gif" && post.Mime == "image/gif" {
@@ -718,7 +729,6 @@ func getImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusNotFound)
 }
 
 func postComment(w http.ResponseWriter, r *http.Request) {
