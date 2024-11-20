@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -265,7 +264,7 @@ func getTemplPath(filename string) string {
 func getInitialize(w http.ResponseWriter, r *http.Request) {
 	dbInitialize()
 	go func() {
-		if _, err := http.Get("http://18.179.196.77:9000/api/group/collect"); err != nil {
+		if _, err := http.Get("http://54.248.213.122:9000/api/group/collect"); err != nil {
 			log.Printf("failed to communicate with pprotein: %v", err)
 		}
 	}()
@@ -677,21 +676,28 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 
 	// fileをpublicに保存
 	// ディレクトリがない場合は作成する
-	os.MkdirAll(filepath.Join("../public", "img", "posts"), 0755)
-	filePath := filepath.Join("../public", "img/posts", fmt.Sprintf("%d", pid)+"."+strings.Split(mime, "/")[1])
-	err = os.WriteFile(filePath, filedata, 0644)
-	if err != nil {
-		log.Print(err)
-		return
-	}
+	// fileの保存が良くなさそう
+
+	// os.MkdirAll(filepath.Join("../public", "image"), 0757)
+	// filePath := filepath.Join("../public", "image", fmt.Sprintf("%d", pid)+"."+strings.Split(mime, "/")[1])
+	// _file, err := os.Create(filePath)
+	// if err != nil {
+	// 	log.Print(err)
+	// 	return
+	// }
+	// defer _file.Close()
+
+	// err = SaveImage(filedata, filePath)
+	// if err != nil {
+	// 	log.Print(err)
+	// 	return
+	// }
 
 	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)
 }
 
-// 基本的にはnginxから返すようにする。ファイルがない場合はgetImageを呼ぶ。
-// getImage時にファイルをpublic/img/posts/に保存する。
 func getImage(w http.ResponseWriter, r *http.Request) {
-	pidStr := r.PathValue("id")
+	pidStr := chi.URLParam(r, "id")
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -699,37 +705,110 @@ func getImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	post := Post{}
-	err = db.Get(&post, "SELECT * FROM `posts` WHERE `id` = ?", pid)
+	err = db.Get(&post, "SELECT mime FROM posts WHERE id = ?", pid)
 	if err != nil {
 		log.Print(err)
 		return
+
 	}
-
-	ext := r.PathValue("ext")
-
-	// fileをpublicに保存
-	// ディレクトリがない場合は作成する
-	os.MkdirAll(filepath.Join("../public", "img", "posts"), 0755)
-	filePath := filepath.Join("../public", "img/posts", fmt.Sprintf("%d", pid)+"."+ext)
-	err = os.WriteFile(filePath, post.Imgdata, 0644)
-	if err != nil {
-		log.Print(err)
-		return
-	}
-
+	ext := chi.URLParam(r, "ext")
 	if ext == "jpg" && post.Mime == "image/jpeg" ||
 		ext == "png" && post.Mime == "image/png" ||
 		ext == "gif" && post.Mime == "image/gif" {
 		w.Header().Set("Content-Type", post.Mime)
-		_, err := w.Write(post.Imgdata)
+
+		err = db.Get(&post, "SELECT imgdata FROM posts WHERE id = ?", pid)
 		if err != nil {
 			log.Print(err)
 			return
 		}
+
+		f, err := os.Create(fmt.Sprintf("../public/img/%d.%s", pid, ext))
+		if err != nil {
+			log.Print(err)
+			return
+		}
+		defer f.Close()
+
+		_, err = f.Write(post.Imgdata)
+		if err != nil {
+			log.Print(err)
+			return
+		}
+
+		_, err = w.Write(post.Imgdata)
+		if err != nil {
+			log.Print(err)
+			return
+		}
+
 		return
 	}
 
+	w.WriteHeader(http.StatusNotFound)
 }
+
+// 基本的にはnginxから返すようにする。ファイルがない場合はgetImageを呼ぶ。
+// getImage時にファイルをpublic/img/posts/に保存する。
+// func getImage(w http.ResponseWriter, r *http.Request) {
+// 	pidStr := r.PathValue("id")
+// 	pid, err := strconv.Atoi(pidStr)
+// 	if err != nil {
+// 		w.WriteHeader(http.StatusNotFound)
+// 		return
+// 	}
+
+// 	post := Post{}
+// 	err = db.Get(&post, "SELECT * FROM `posts` WHERE `id` = ?", pid)
+// 	if err != nil {
+// 		log.Print(err)
+// 		return
+// 	}
+
+// 	ext := r.PathValue("ext")
+
+// 	if ext == "jpg" && post.Mime == "image/jpeg" ||
+// 		ext == "png" && post.Mime == "image/png" ||
+// 		ext == "gif" && post.Mime == "image/gif" {
+// 		// fileをpublicに保存
+// 		// ディレクトリがない場合は作成する
+// 		// os.MkdirAll(filepath.Join("../public", "image"), 0757)
+// 		// filePath := filepath.Join("../public", "image", fmt.Sprintf("%d", pid)+"."+ext)
+// 		// _file, err := os.Create(filePath)
+// 		// if err != nil {
+// 		// 	log.Print(err)
+// 		// 	return
+// 		// }
+// 		// defer _file.Close()
+
+// 		// err = os.Chmod(filePath, 0757)
+
+// 		// _, err = _file.Write(post.Imgdata)
+// 		// if err != nil {
+// 		// 	log.Print(err)
+// 		// 	return
+// 		// }
+
+// 		// ファイルに書き出す
+// 		filename := "../public/image/" + pidStr + "." + ext
+// 		err = os.WriteFile(filename, post.Imgdata, 0757)
+// 		if err != nil {
+// 			log.Print(err)
+// 			return
+// 		}
+
+// 		// レスポンスを返す
+// 		w.Header().Set("Content-Type", post.Mime)
+// 		_, err = w.Write(post.Imgdata)
+
+// 		if err != nil {
+// 			log.Print(err)
+// 			return
+// 		}
+// 		return
+// 	}
+
+// }
 
 func postComment(w http.ResponseWriter, r *http.Request) {
 	me := getSessionUser(r)
