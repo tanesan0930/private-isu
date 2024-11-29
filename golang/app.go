@@ -51,6 +51,7 @@ type Post struct {
 	Imgdata      []byte    `db:"imgdata"`
 	Body         string    `db:"body"`
 	Mime         string    `db:"mime"`
+	AccountName  string    `db:"account_name"`
 	CreatedAt    time.Time `db:"created_at"`
 	CommentCount int
 	Comments     []Comment
@@ -172,27 +173,38 @@ func getFlash(w http.ResponseWriter, r *http.Request, key string) string {
 	}
 }
 
+var commentCounts = map[int]int{}
+
 func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, error) {
 	var posts []Post
 
 	for _, p := range results {
-		err := db.Get(&p.CommentCount, "SELECT COUNT(*) AS `count` FROM `comments` WHERE `post_id` = ?", p.ID)
-		if err != nil {
-			return nil, err
+
+		// コメント数をキャッシュから取得
+		if count, found := commentCounts[p.ID]; found {
+			p.CommentCount = count // キャッシュがあれば利用
+		} else {
+			// キャッシュがなければデータベースから取得
+			err := db.Get(&p.CommentCount, "SELECT COUNT(*) AS `count` FROM `comments` WHERE `post_id` = ?", p.ID)
+			if err != nil {
+				return nil, err
+			}
+			// キャッシュに保存
+			commentCounts[p.ID] = p.CommentCount
 		}
 
-		query := "SELECT * FROM `comments` WHERE `post_id` = ? ORDER BY `created_at` DESC"
+		query := "SELECT * FROM `comments` WHERE `post_id` = ? ORDER BY `created_at` DESC" // コメント自体にもキャッシュを持たせるところから
 		if !allComments {
 			query += " LIMIT 3"
-		}
+		} // 最新3件のコメントのみ取得
 		var comments []Comment
-		err = db.Select(&comments, query, p.ID)
+		err := db.Select(&comments, query, p.ID)
 		if err != nil {
 			return nil, err
 		}
 
 		for i := 0; i < len(comments); i++ {
-			err := db.Get(&comments[i].User, "SELECT * FROM `users` WHERE `id` = ?", comments[i].UserID)
+			err := db.Get(&comments[i].User, "SELECT * FROM `users` WHERE `id` = ?", comments[i].UserID) // コメントしたユーザーの情報を取得
 			if err != nil {
 				return nil, err
 			}
@@ -205,19 +217,22 @@ func makePosts(results []Post, csrfToken string, allComments bool) ([]Post, erro
 
 		p.Comments = comments
 
-		err = db.Get(&p.User, "SELECT * FROM `users` WHERE `id` = ?", p.UserID)
-		if err != nil {
-			return nil, err
-		}
+		// err = db.Get(&p.User, "SELECT * FROM `users` WHERE `id` = ?", p.UserID) // 投稿したユーザーの情報を取得
+		// if err != nil {
+		// 	return nil, err
+		// }
+
+		p.User = User{AccountName: p.AccountName}
 
 		p.CSRFToken = csrfToken
+		posts = append(posts, p)
 
-		if p.User.DelFlg == 0 {
-			posts = append(posts, p)
-		}
-		if len(posts) >= postsPerPage {
-			break
-		}
+		// if p.User.DelFlg == 0 {
+		// 	posts = append(posts, p)
+		// }
+		// if len(posts) >= postsPerPage {
+		// 	break
+		// }
 	}
 
 	return posts, nil
@@ -264,7 +279,7 @@ func getTemplPath(filename string) string {
 func getInitialize(w http.ResponseWriter, r *http.Request) {
 	dbInitialize()
 	go func() {
-		if _, err := http.Get("http://54.248.213.122:9000/api/group/collect"); err != nil {
+		if _, err := http.Get("http://43.207.145.169:9000/api/group/collect"); err != nil {
 			log.Printf("failed to communicate with pprotein: %v", err)
 		}
 	}()
@@ -392,7 +407,7 @@ func getIndex(w http.ResponseWriter, r *http.Request) {
 
 	results := []Post{}
 
-	err := db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` ORDER BY `created_at` DESC LIMIT 20")
+	err := db.Select(&results, "SELECT p.id, p.user_id, p.body, p.created_at, p.mime, u.account_name FROM `posts` AS p JOIN `users` AS u ON (p.user_id = u.id) WHERE u.del_flg=0 ORDER BY p.created_at DESC LIMIT 20")
 	if err != nil {
 		log.Print(err)
 		return
@@ -438,7 +453,7 @@ func getAccountName(w http.ResponseWriter, r *http.Request) {
 
 	results := []Post{}
 
-	err = db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `user_id` = ? ORDER BY `created_at` DESC", user.ID)
+	err = db.Select(&results, "SELECT p.id, p.user_id, p.body, p.created_at, p.mime, u.account_name FROM `posts` AS p JOIN `users` AS u ON (p.user_id = u.id) WHERE u.del_flg=0 ORDER BY p.created_at DESC LIMIT 20", user.ID)
 	if err != nil {
 		log.Print(err)
 		return
@@ -526,7 +541,7 @@ func getPosts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := []Post{}
-	err = db.Select(&results, "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `created_at` <= ? ORDER BY `created_at` DESC", t.Format(ISO8601Format))
+	err = db.Select(&results, "SELECT p.id, p.user_id, p.body, p.created_at, p.mime, u.account_name FROM `posts` AS p JOIN `users` AS u ON (p.user_id = u.id) WHERE p.created_at <= ? ORDER BY p.created_at DESC LIMIT 20", t.Format(ISO8601Format))
 	if err != nil {
 		log.Print(err)
 		return
@@ -562,7 +577,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := []Post{}
-	err = db.Select(&results, "SELECT * FROM `posts` WHERE `id` = ?", pid)
+	err = db.Select(&results, "SELECT p.id, p.user_id, p.body, p.created_at, p.mime, u.account_name FROM `posts` AS p JOIN `users` AS u ON (p.user_id = u.id) WHERE p.id = ?", pid)
 	if err != nil {
 		log.Print(err)
 		return
@@ -723,7 +738,7 @@ func getImage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		f, err := os.Create(fmt.Sprintf("../public/img/%d.%s", pid, ext))
+		f, err := os.Create(fmt.Sprintf("../public/image/%d.%s", pid, ext))
 		if err != nil {
 			log.Print(err)
 			return
@@ -835,6 +850,7 @@ func postComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	delete(commentCounts, postID) // コメント数のキャッシュを削除
 	http.Redirect(w, r, fmt.Sprintf("/posts/%d", postID), http.StatusFound)
 }
 
